@@ -1,0 +1,80 @@
+---@meta
+
+--- Module `lapis.spec.request`
+---
+--- Provides the `mock_request` function
+---
+--- [mock_request](https://leafo.net/lapis/reference/testing.html#mocking-a-request)
+local request = {}
+
+---@class lapis.mock_request.options
+---@field get? table<string, string> A table of GET parameters to add to the url
+---@field post? table<string, string> A table of POST parameters (sets default method to `"POST"`)
+---@field method? string The HTTP method to use (defaults to `"GET"`)
+---@field headers? table<string, string> Additional HTTP request headers
+---@field cookies? table<string, string> A table of cookies to insert into headers
+---@field session? table A session table to encode into the cookies
+---@field host? string The host the mocked server (defaults to `"localhost"`)
+---@field port? integer The port of the mocked server (defaults to `80`)
+---@field scheme? string The scheme of the mocked server (defaults to `"http"`)
+---@field prev? table<string, string> A table of the response headers from a previous `mock_request`
+---@field allow_error? boolean Don’t automatically convert 500 server errors into Lua errors (defaults to `false`)
+
+--- In order to test your application it should be a Lua module that can be
+--- `require`d without any side effects. Ideally you'll have a separate file for
+--- each application and you can get the application class just by loading the
+--- module.
+---
+--- In these examples we'll define the application in the same file as the tests
+--- for simplicity.
+---
+--- A request can be mocked using the `mock_request` function defined in
+--- `lapis.spec.request`:
+---
+--- ```lua
+--- local mock_request = require("lapis.spec.request").mock_request
+---
+--- local status, body, headers = mock_request(app, url, options)
+--- ```
+---
+--- For example, to test a basic application with Busted we could do:
+---
+--- ```lua
+--- local lapis = require("lapis.application")
+--- local mock_request = require("lapis.spec.request").mock_request
+---
+--- local app = lapis.Application()
+---
+--- app:match("/hello", function(self)
+---    return "welcome to my page"
+--- end)
+---
+--- describe("my application", function()
+---    it("should make a request", function()
+---       local status, body = mock_request(app, "/hello")
+---
+---       assert.same(200, status)
+---       assert.truthy(body:match("welcome"))
+---    end)
+--- end)
+--- ```
+---
+--- `mock_request` simulates an `ngx` variable from the Lua Nginx module and
+--- executes the application. The `options` argument of `mock_request` can be used
+--- to control the kind of request that is simulated.
+---
+--- If you want to simulate a series of requests that use persistent data like
+--- cookies or sessions you can use the `prev` option in the table. It takes the
+--- headers returned from a previous request.
+---
+--- ```lua
+--- local r1_status, r1_res, r1_headers = mock_request(my_app, "/first_url")
+--- local r2_status, r2_res = mock_request(my_app, "/second_url", { prev = r1_headers })
+--- ```
+---@param app lapis.Application
+---@param url string
+---@param opts? lapis.mock_request.options
+---@return integer, string, table<string, string>
+function request.mock_request(app, url, opts) end
+
+return request

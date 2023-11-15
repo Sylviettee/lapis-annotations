@@ -1,0 +1,71 @@
+---@meta
+
+--- Module `lapis.spec.db`
+---
+--- Provides the `truncate_tables` function
+---
+--- When writing tests that work with your models it's useful to have a separate
+--- test database where data can reset and generated to unit test model
+--- functionality. By having a functioning database connection you can perform
+--- full integration testing across your application code and the database,
+--- ensuring that it works as intended.
+---
+--- The typical strategy is:
+---
+--- * Before every test, truncate the tables of the models that are accessed by
+--- the code that will run in the test
+--- * Within your test suite:
+---   * Use a *factory* function to create any rows that may be needed for an
+--- initial state
+---   * Perform your tests using the models as you would in your application
+---
+--- Because truncating tables is a common operation, Lapis provides a
+--- `truncate_tables` function:
+---
+--- [truncate_tables](https://leafo.net/lapis/reference/testing.html#test-strategies/working-with-models)
+local db = {}
+
+--- Note: Truncate tables will **delete** all the data in the respective table,
+--- with no way to get it back. Because this is a dangerous operation it will
+--- only run when the current environment is named `test`.
+---
+--- ```lua
+--- local truncate_tables = require("lapis.spec.db").truncate_tables
+---
+--- describe("User profiles", function()
+---    local models = require("models")
+---    local Users, Profiles = models.Users, models.Profiles
+---
+---    before_each(function()
+---       return truncate_tables(Users, Profiles)
+---    end)
+---
+---    local user_counter = 0
+---    local function user_factory()
+---       user_counter = user_counter + 1
+---       return Users:create({
+---          login = "user-" .. tostring(user_counter)
+---       })
+---    end
+---
+---    return it("fetches or creates the user's profile", function()
+---       local user1 = user_factory()
+---       local user2 = user_factory()
+---       user1:create_profile_if_necessary()
+---       assert.truthy(user1:get_profile(), "user1 should have a profile")
+---       return assert["nil"](user2:get_profile(), "user2 should not have a profile")
+---    end)
+--- end)
+--- ```
+---
+--- Because some models might have *unique indexes* on certain fields, like `login`
+--- on the User model above, we can use the *counter* pattern to ensure that our
+--- factory function generates a new User row without conflict.
+---
+--- If you have many factories that you re-use across different test files, it can
+--- be helpful to put it into a separate module that you can `require` into your
+--- tests as needed.
+---@param ... lapis.Model
+function db.truncate_tables(...) end
+
+return db

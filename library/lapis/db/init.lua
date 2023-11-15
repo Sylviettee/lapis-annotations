@@ -1,0 +1,513 @@
+---@meta
+
+--- Module `lapis.db`
+---
+--- [Database](https://leafo.net/lapis/reference/database.html)
+local db = {}
+
+--- Sends a query to the database using an active & available connection. If
+--- there is no connection, then Lapis will automatically allocate & connect one
+--- using the details provided in your configuration.
+---
+--- Returns the results as a Lua table if successful. Will throw an error if the
+--- operation failed.
+---
+--- The first argument is the query to perform. If the query contains any `?`s
+--- then they are replaced in the order they appear with the remaining arguments.
+--- The remaining arguments are escaped with `escape_literal` before being
+--- interpolated, making SQL injection impossible.
+---
+--- ``` lua
+--- local res1 = db.query("SELECT * FROM hello")
+--- res1 = db.query("SELECT * FROM users WHERE ?", db.clause({
+---    deleted = true,
+---    status = "deleted"
+--- }))
+--- local res2 = db.query("UPDATE things SET color = ?", "blue")
+--- local res3 = db.query("INSERT INTO cats (age, name, alive) VALUES (?, ?, ?)", 25, "dogman", true)
+--- ```
+---
+--- ```sql
+--- SELECT * FROM hello
+--- SELECT * FROM users WHERE deleted AND status = 'deleted'
+--- UPDATE things SET color = 'blue'
+--- INSERT INTO cats (age, name, alive) VALUES (25, 'dogman', TRUE)
+--- ```
+---
+--- A query that fails to execute will raise a Lua error. The error will contain
+--- the message from the database along with the query.
+---
+--- Every single function that Lapis provides which communicates with the
+--- database will eventually end up calling `db.query`. The same logic with
+--- regards to error handling and connection management applies to all database
+--- operations that Lapis does.
+---@param query string
+---@param ... any
+---@return table<string, any>[]
+function db.query(query, ...) end
+
+--- Similar to `db.query`, but it appends `"SELECT"` to the front of the query.
+---
+--- ```lua
+--- local res = db.select("* from hello where active = ?", false)
+--- ```
+---
+--- ```sql
+--- SELECT * FROM hello WHERE active = FALSE
+--- ```
+---@param query string
+---@param ... any
+---@return table<string, any>[]
+function db.select(query, ...) end
+
+---@class lapis.db.insert_opts
+---@field returning? string|string[] An array table of column names or the string `'*'` to represent all column names. Their values will be return from the insertion query using `RETURNING` clause to initially populate the model object. `db.raw` can be used for more advanced expressions
+---@field on_conflict? string Control the `ON CONFLICT` clause for the insertion query. Currently only supports the string value `"do_nothing"` to do nothing when the query has a conflict
+
+--- Inserts a row into `table`.`values` is a Lua table of column names and
+--- values.
+---
+--- ```lua
+--- db.insert("my_table", {
+---    age = 10,
+---    name = "Hello World"
+--- })
+--- ```
+---
+--- ```sql
+--- INSERT INTO "my_table" ("age", "name") VALUES (10, 'Hello World')
+--- ```
+---
+--- A list of column names to be returned can be given after the value table:
+---
+--- ```lua
+--- local res = db.insert("some_other_table", {
+---    name = "Hello World"
+--- }, "id")
+--- ```
+---
+--- ```sql
+--- INSERT INTO "some_other_table" ("name") VALUES ('Hello World') RETURNING "id"
+--- ```
+---
+--- Note: RETURNING and ON CONFLICT are PostgreSQL feature, and not available
+--- when using MySQL
+---
+--- Alternatively, a options table can be provided as third argument with
+--- support for the following fields: (When providing an options table, all
+--- other arguments are ignored)
+---@param table string
+---@param value table<string, any>
+---@param ... string | lapis.db.insert_opts
+---@return table<string, any>[]
+function db.insert(table, value, ...) end
+
+---@class lapis.db.encodable : any
+
+---@alias lapis.db.condition string | table<string, any> | lapis.db.encodable
+
+---@class lapis.db.query_result : table<string, any>[]
+---@field affected_rows integer
+
+--- Updates `table` with `values` on all rows that match `conditions`. If
+--- conditions is a plain table or a `db.clause` object, then it will be
+--- converted to SQL using `db.encode_clause`.
+---
+--- ```lua
+--- db.update("the_table", {
+---    name = "Dogbert 2.0",
+---    active = true
+--- }, {
+---    id = 100,
+---    active = db.NULL
+--- })
+--- ```
+---
+--- ```sql
+--- UPDATE "the_table" SET "name" = 'Dogbert 2.0', "active" = TRUE WHERE "id" = 100 and "active" IS NULL
+--- ```
+---
+--- The return value is a table containing the status of the update. The number
+--- of rows updated can be determined by the `affected_rows` field of the
+--- returned table.
+---
+--- `conditions` can also be a string, the remaining arguments will be
+--- interpolated into the query as if you called `db.interpolate_query`.
+---
+--- ```lua
+--- db.update("the_table", {
+---    count = db.raw("count + 1")
+--- }, "count > ?", 10)
+--- ```
+---
+--- ```sql
+--- UPDATE "the_table" SET "count" = count + 1 WHERE count > 10
+--- ```
+---
+--- When using a table or `db.clause` argument for conditions, all the extra
+--- arguments are escaped as identifiers and appended as a `RETURNING` clause:
+---
+--- ```lua
+--- db.update("cats", {
+---    count = db.raw("count + 1")
+--- }, {
+---    id = 1200
+--- }, "count")
+--- ```
+---
+--- ```sql
+--- UPDATE "cats" SET "count" = count + 1, WHERE "id" = 1200 RETURNING count
+--- ```
+---
+--- Note: You can use a `db.raw()` in place of the returning identifier name to
+--- evaluate a raw sql expression.
+---
+--- When using the returning clause the return value of `db.update` will be an
+--- array of rows generated by the `RETURNING` expression, in addition to
+--- containing the `affected_rows` field.
+---
+--- `RETURNING` is a PostgreSQL feature, and is not available when using MySQL
+---@param table string
+---@param values table<string, any>
+---@param conditions lapis.db.condition
+---@param ... any
+---@return lapis.db.query_result
+function db.update(table, values, conditions, ...) end
+
+--- Deletes rows from `table` that match `conditions`.
+---
+--- The `conditions` argument can either be a Lua table mapping column to value,
+--- a `db.clause`, or a string as a SQL fragment. When using the string
+--- condition, the remaining arguments as passed as parameters to the SQL
+--- fragment as if you called `db.interpolate_query`.
+---
+--- The return value is a table containing the status of the delete. The number
+--- of rows deleted can be determined by the `affected_rows` field of the
+--- returned table.
+---
+--- ```lua
+--- db.delete("cats", {
+---    name = "Roo"
+--- })
+--- db.delete("cats", "name = ? and age is null", "Gato")
+--- ```
+---
+--- ```sql
+--- DELETE FROM "cats" WHERE "name" = 'Roo'
+--- DELETE FROM "cats" WHERE name = 'Gato' and age is null
+--- ```
+---
+--- When using a table argument for conditions, all the extra arguments are
+--- escaped as identifiers and appended as a `RETURNING` clause:
+---
+--- ```lua
+--- db.delete("cats", {
+---    id = 1200
+--- }, "last_updated_at")
+--- ```
+---
+--- ```sql
+--- DELETE FROM "cats" WHERE "id" = 1200 RETURNING "last_updated_at"
+--- ```
+---
+--- Note: You can use a `db.raw()` in place of the returning identifier name to
+--- evaluate a raw sql expression.
+---
+--- The return value will now be an array of rows generated by the return values,
+--- in addition to containing the `affected_rows` field.
+---
+--- Note: `RETURNING` is a PostgreSQL feature, and is not available when using
+--- MySQL
+---@param table string
+---@param conditions lapis.db.condition
+---@param ... any
+---@return lapis.db.query_result
+function db.delete(table, conditions, ...) end
+
+--- Escapes a value for use in a query. A value is any type that can be stored
+--- in a column. Numbers, strings, and booleans will be escaped accordingly.
+---
+--- ```lua
+--- local escaped = db.escape_literal(value)
+--- local res = db.query("select * from hello where id = " .. escaped)
+--- ```
+---
+--- `escape_literal` is not appropriate for escaping column or table names. See
+--- `escape_identifier`.
+---@param value any
+---@return string
+function db.escape_literal(value) end
+
+--- Escapes a string for use in a query as an identifier. An identifier is a
+--- column or table name.
+---
+--- ```lua
+--- local table_name = db.escape_identifier("table")
+--- local res = db.query("select * from " .. table_name)
+--- ```
+---
+--- `escape_identifier` is not appropriate for escaping values. See
+--- `escape_literal` for escaping values.
+---@param str string
+---@return string
+function db.escape_identifier(str) end
+
+--- Interpolates a query containing `?` markers with the rest of the arguments
+--- escaped via `escape_literal`. If a `db.clause` is passed as one of the
+--- arguments, then it will be encoded using `db.encode_clause`.
+---
+--- ```lua
+--- local q = db.interpolate_query("select * from table where value = ?", 42)
+--- local res = db.query(q)
+--- ```
+---@param query string
+---@param ... any
+---@return string
+function db.interpolate_query(query, ...) end
+
+--- Generates a boolean SQL expression from an object describing one or many
+--- conditions. The `clause` argument must be either a plain Lua table or a
+--- value returned by `db.clause`.
+---
+--- If provided a plain table, then all key, value pairs are taken from the
+--- table using `pairs`,and converted to an SQL fragment similar to
+--- `db.escape_identifier(key) = db.escape_literal(value)`, then concatenated
+--- with the `AND` SQL operator.
+---
+--- ```lua
+--- print(db.encode_clause({
+---    name = "Garf",
+---    color = db.list({
+---       "orange",
+---       "ginger"
+---    }),
+---    processed_at = db.NULL
+--- }))
+--- ```
+---
+--- If provided a `db.clause`, then a richer set of conditions can be described.
+--- See the documentation for `db.clause`
+---
+--- `db.encode_clause` will throw an error on an empty clause. This is to prevent
+--- the mistake of accidentally providing `nil` in place of a value of `db.NULL`
+--- that results in generating a clause that matches a much wider range of data
+--- than desired.
+---@param clause_obj table
+---@return string
+function db.encode_clause(clause_obj) end
+
+--- Returns an object wrapping the string argument that will be inserted
+--- verbatim into a query without being escaped. Special care should be taken to
+--- avoid generating invalid SQL and and to avoid introducing SQL injection
+--- attacks by concatenated unsafe data into the string.
+---
+--- `db.raw` can be used in almost any place where SQL query construction takes
+--- place.  For example, `db.escape_literal` and `db.escape_identifier` will
+--- both pass the string through unchanged. It can also be used in
+--- `db.encode_clause` for both keys and values. You can use it where things
+--- like column names or table names are also requested (eg. `db.update`)
+---
+--- ```lua
+--- db.update("the_table", {
+---    count = db.raw("count + 1")
+--- })
+--- db.select("* from another_table where x = ?", db.raw("now()"))
+--- ```
+---
+--- ```sql
+--- UPDATE "the_table" SET "count" = count + 1
+--- SELECT * from another_table where x = now()
+--- ```
+---@param str string
+---@return lapis.db.encodable
+function db.raw(str) end
+
+--- Returns `true` if `obj` is a value created by `db.raw`.
+---@param obj any
+---@return boolean
+function db.is_raw(obj) end
+
+--- Returns a special value that will be inserted into the query using SQL's
+--- list syntax. It takes a single argument of an array table. A new object is
+--- returned that wraps the original table. The original table is not modified.
+---
+--- The resulting object can be used in place of a value used within SQL query
+--- generation with functions like `interpolate_query` and `encode_clause`. Each
+--- item in the list will be escaped with `escape_literal` before being inserted
+--- into the query.
+---
+--- Note how when it is used as a value for an SQL clause object, the `IN`
+--- syntax is used.
+---
+--- ```lua
+--- local ids = db.list({
+---    3,
+---    2,
+---    1,
+---    5
+--- })
+--- local res = db.select("* from another table where id in ?", ids)
+--- db.update("the_table", {
+---    height = 55
+--- }, {
+---    ids = ids
+--- })
+--- ```
+---@param list any[]
+---@return lapis.db.encodable
+function db.list(list) end
+
+--- Returns `true` if `obj` is a value created by `db.list`.
+---@param obj any
+---@return boolean
+function db.is_list(obj) end
+
+---@class lapis.db.clause_opts
+---@field operator? string Change the operator used to join the clause components. eg. `AND`, `OR`
+---@field table_name? string Prefixes each named field with the escaped table name. Note that this does not apply to SQL fragments in the clause. Sub-clauses are also not affected.
+---@field allow_empty? boolean By default, an empty clause will throw an error when it is attempted to be encoded. This is to prevent you from accidentally filtering on something that has a nil value that should actually be provided. You must set this field to `true` in order to allow for the empty clause to be encoded into a query.
+---@field prefix? string Will append the string provided (separated by a space) to the front of the encoded result only if there is something in the table to be encoded. This can be combined with `allow_empty` to easily build optional `WHERE` clauses for queries
+
+--- Creates a *clause* object that can be encoded into a boolean SQL expression
+--- for filtering or finding operations in the database. A clause object is an
+--- encodable type that can be used in places like `db.encode_clause` and and
+--- `db.interpolate_query` to safely generate an SQL fragment where all values
+--- are escaped accordingly. Any built in Lapis functions that can take an
+--- object to filter the affected rows can also take a clause object in place of
+--- a query fragment or plain Lua table.
+---
+--- By default, a clause object will combine all parameters contained with the
+--- `AND` operator.
+---
+--- When encoded to SQL, the clause object will attempt to extract filters from
+--- all entries in the table:
+---
+--- * Key, value pairs in the hash-table portion of the clause table will be
+---   converted to a SQL fragment similar to `db.escape_identifier(key) =
+---   db.escape_literal(value)`. This mode is aware of booleans and `db.list`
+---   objects to generate the correct syntax
+--- * Values in the array portion of the clause table will handled based on
+---   their type:
+---   * String values will be treated as raw SQL fragments that will be
+---     concatenated into the clause directly. All string values are wrapped in
+---     `()` to ensure there are no precedence issues
+---   * Table values will passed to `interpolate_query` if the sub-table's first
+---     item is a string, eg. `{"views_count > ?", 100}`
+---   * A `nil` value will be skipped, meaning you can place conditionals
+---     directly inside of the clause
+---   * Clause objects can be nested by placing them in the array portion of the
+---     clause table
+---
+--- Here is an example demonstrating all the different ways of building out a clause:
+---
+--- ```lua
+--- local filter = db.clause({
+---    id = 12,
+---    "username like '%admin'",
+---    deleted = false,
+---    status = db.list({
+---       3,
+---       4
+---    }),
+---    {
+---       "views_count > ?",
+---       100
+---    },
+---    db.clause({
+---       active = true,
+---       promoted = true
+---    }, {
+---       operator = "OR"
+---    })
+--- })
+--- local res = db.query("SELECT * FROM profiles WHERE ?", filter)
+--- ```
+---
+--- The following SQL will be generated:
+---
+--- ```sql
+--- SELECT * FROM profiles WHERE (username like '%admin') AND (views_count > 100) AND ("active" OR "promoted") AND "status" IN (3, 4) AND "id" = 12 AND not "deleted",
+--- ```
+---
+--- The second argument can be a table of options.
+---@param clause table
+---@param opts? lapis.db.clause_opts
+---@return lapis.db.encodable
+function db.clause(clause, opts) end
+
+--- Returns `true` if `obj` is a value created by `db.clause`.
+---@param obj any
+---@return boolean
+function db.is_clause(obj) end
+
+--- Converts the argument passed to an array type that will be inserted/updated
+--- using PostgreSQL's array syntax. This function does not exist for MySQL.
+---
+--- The return value of this function can be used in place of any regular value
+--- passed to a SQL query function. Each item in the list will be escaped with
+--- `escape_literal` before being inserted into the query.
+---
+--- **Note:** This function mutates the object passed in by setting its
+--- metatable. The returning object is the same value as the argument. This will
+--- allow the object to still function as a regular Lua array. If you do not
+--- want to mutate the argument, you must make a copy before passing it in.
+---
+--- Additionally, when a query returns an array from the database, it is
+--- automatically converted into a `db.array`.
+---
+--- ```lua
+--- db.insert("some_table", {
+---    tags = db.array({
+---       "hello",
+---       "world"
+---    })
+--- })
+--- ```
+---
+--- ```sql
+--- INSERT INTO "some_table" ("tags") VALUES (ARRAY['hello','world'])
+--- ```
+---@param array any[]
+---@return lapis.db.encodable
+function db.array(array) end
+
+--- Returns `true` if `obj` is a table with the `PostgresArray` metatable (eg. a
+--- value created by `db.array`)
+---@param obj any
+---@return boolean
+function db.is_array(obj) end
+
+---@type lapis.db.encodable
+--- Represents `NULL` in SQL syntax. In Lua, `nil` can't be stored in a table,
+--- so the `db.NULL` object can be used to provide `NULL` as a value. When used
+--- with `encode_clause`, the `IS NULL` syntax is automatically used.
+---
+--- ```lua
+-- db.update("the_table", {
+--    name = db.NULL
+-- })
+--- ```
+---
+--- ```sql
+--- UPDATE "the_table" SET name = NULL
+--- ```
+db.NULL = ''
+
+---@type lapis.db.encodable
+--- Represents `TRUE` in SQL syntax. In most cases, it is not necessary to use
+--- this constant, and instead the Lua boolean values can be used.
+db.TRUE = true
+
+---@type lapis.db.encodable
+--- Represents `FALSE` in SQL syntax. In most cases, it is not necessary to use
+--- this constant, and instead the Lua boolean values can be used.
+db.FALSE = false
+
+--- Returns a date string formatted properly for insertion in the database.
+---
+--- The `time` argument is optional, will default to the current UTC time.
+---@param time? number|osdate
+---@return string
+function db.format_time(time) end
+
+return db

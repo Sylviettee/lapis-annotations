@@ -1,0 +1,950 @@
+---@meta
+
+--- Module `lapis.db.model`
+---
+--- [Model](https://leafo.net/lapis/reference/models.html)
+--- |
+--- [Preload](https://leafo.net/lapis/reference/models.html#preloading-relations)
+--- |
+--- [Enum](https://leafo.net/lapis/reference/models.html#enum)
+local model = {}
+
+--- Lapis provides a `Model` base class for making Lua tables that can be
+--- synchronized with a database row. The class is used to represent a single
+--- database table, an instance of the class is used to represent a single row
+--- of that table.
+---
+--- The most primitive model is a blank model:
+---
+--- ```lua
+--- local Model = require("lapis.db.model").Model
+---
+--- local Users = Model:extend("users")
+--- ```
+---
+--- The first argument to `extend` is the name of the table to associate the
+--- model to.
+---
+--- Model instances will have a field for each column that has been fetched from
+--- the database. You do not need to manually specify the names of the columns.
+--- If you have any relationships, though, you can specify them using the
+--- `relations` property.
+---
+--- ### Custom Methods
+---
+--- The model system in Lapis implements an object-oriented interface for
+--- working with tables and rows from your database.
+---
+--- When you `extend` the base Model class you get a new model class that you
+--- can customize for your use. This includes adding your own properties and
+--- methods to the Model class and instances of that model.
+---
+--- The `extend` method on the base model class returns a second value: the
+--- instance metatable. You can use this table to add new methods & properties
+--- to instances of the model, aka rows fetched by that model.
+---
+--- ```lua
+--- local Users, Users_mt = Model:extend("users")
+---
+--- -- this method will be available on all User instances
+--- function Users_mt:get_display_name()
+---    return self.display_name or self.username
+--- end
+---
+--- local some_user = Users:find(1)
+--- print(some_user:get_display_name())
+--- ```
+---
+--- To recap: the Model class object and the Model's metatable are two distinct
+--- objects. The metatable object is strictly for adding methods and properties
+--- to instances of the model. Adding a method to the Model itself, will only
+--- make it available on the Model class, and not for any rows.
+---
+--- You can even use the ability to add custom methods to implement interfaces
+--- that may be used by other parts of Lapis. For example, you can make model
+--- instances capable of generating their own URLs when passed to
+--- `request:url_for` by implementing a `url_params` method.
+---
+--- ### Primary Keys
+---
+--- By default all models expect the table to have a primary key called `"id"`.
+--- This can be changed by setting the `primary_key` field on the class.
+---
+--- ```lua
+--- local Users = Model:extend("users", {
+---    primary_key = "login"
+--- })
+--- ```
+---
+--- If there are multiple primary keys then an array table can be used:
+---
+--- ```lua
+--- local Followings = Model:extend("followings", {
+---    primary_key = { "user_id", "followed_user_id" }
+--- })
+--- ```
+---
+--- A unique primary key is needed for every row in order to `update` and
+--- `delete` rows without affecting other rows unintentionally.
+---
+--- ### Class Methods
+---
+--- Model class methods are used for fetching existing rows, creating new ones, or
+--- fetching data about the underlying table.
+---
+--- For the following examples assume we have the following models:
+---
+--- ```lua
+--- local Model = require("lapis.db.model").Model
+---
+--- local Users = Model:extend("users")
+---
+--- local Tags = Model:extend("tags", {
+---    primary_key = {"user_id", "tag"}
+--- })
+--- ```
+---@class lapis.Model
+local Model = {}
+
+--- The `find` class method fetches a single row from the table by some
+--- condition. Pass the values of the primary keys you want to look up by in the
+--- order specified by the `primary_keys` assigned in the Model's class.
+---
+--- Note: A model without user defined primary keys has the primary key of `id`
+--- by default. For those models, `find` would take one argument, the value of
+--- `id`.
+---
+--- ```lua
+--- local user = Users:find(23232)
+--- local tag = Tags:find(1234, "programmer")
+--- ```
+---
+--- ```sql
+--- SELECT * from "users" where "id" = 23232 limit 1
+--- SELECT * from "tags" where "user_id" = 1234 and "tag" = 'programmer' limit 1
+--- ```
+---
+--- `find` returns an instance of the model if it could be found, `nil`
+--- otherwise.
+---
+--- An alternate way of calling find is to pass a table as the first argument.
+--- The table will be converted to a `WHERE` clause in the query:
+---
+--- ```lua
+--- local user = Users:find({
+---    email = "person@example.com"
+--- })
+--- ```
+---
+--- ```sql
+--- SELECT * from "users" where "email" = 'person@example.com' limit 1
+--- ```
+---
+--- Like all database finders, you are free to use `db.raw` to embed raw SQL.
+--- For example, you might perform a case insensitive email search like so:
+---
+--- ```lua
+--- local user = Users:find({
+---    [db.raw("lower(email)")] = some_email:lower()
+--- })
+--- ```
+---
+--- ```sql
+--- SELECT * from "users" where lower(email) = 'person@example.com' limit 1
+--- ```
+---@param ... any
+---@return lapis.Entity
+function Model:find(...) end
+
+---@class lapis.model.select_opts
+---@field fields? string A SQL fragment used for the list of fields to return from the query. Do not use untrusted strings otherwise you may be vulnerable to SQL injection. Use `db.escape_identifier` to escape column names.
+---@field load? lapis.Model|boolean Override the model to load each selected row as, Passing `false` to load will return the results unaffected, as plain Lua tables.
+
+--- When searching for multiple rows the `select` class method is used. It works
+--- similarly to the `select` function from the raw query interface except you
+--- specify the part of the query after the list of columns to select.
+---
+--- ```lua
+--- local tags = Tags:select("where tag = ?", "merchant")
+--- ```
+---
+--- ```sql
+--- SELECT * from "tags" where tag = 'merchant'
+--- ```
+---
+--- The `query` argument can also be a `db.clause` object.
+---
+--- Returns a plain Lua array table of model instances for each row returned
+--- from the query. If there are no matching rows an empty table is returned.
+---
+--- The final argument can optionally be a plain Lua table.
+---@param query string|lapis.db.encodable
+---@param ... any
+---@return lapis.Entity[]
+function Model:select(query, ...) end
+
+---@class lapis.model.find_all_opts
+---@field key? string Specify the column name to find by, same effect as passing in a string as the second argument. The column name will be escaped with `db.escape_literal`.
+---@field fields? string A string of raw SQL inserted directly after the `SELECT` portion of the query. Use this to control what fields are returned
+---@field where? table<string, any> A table of additional `where` clauses for the query
+---@field clause? lapis.db.condition A raw SQL fragment to append to query either as string, or array table of arguments to be passed to `db.interpolate_query`
+
+--- If you want to find many rows by their primary key you can use the `find_all`
+--- method. It takes an array table of primary keys. This method only works on
+--- tables that have singular primary keys unless you explicitly pass a column
+--- to search by.
+---
+--- ```lua
+--- local users = Users:find_all({ 1,2,3,4,5 })
+--- ```
+---
+--- ```sql
+--- SELECT * from "users" where "id" in (1, 2, 3, 4, 5)
+--- ```
+---
+--- If you need to find many rows for another column other than the primary key
+--- you can pass in the optional second argument:
+---
+--- ```lua
+--- local users = UserProfile:find_all({ 1,2,3,4,5 }, "user_id")
+--- ```
+---
+--- ```sql
+--- SELECT * from "UserProfile" where "user_id" in (1, 2, 3, 4, 5)
+--- ```
+---
+--- The second argument can also be a table of options.
+---
+--- For example:
+---
+--- ```lua
+--- local users = UserProfile:find_all({1,2,3,4}, {
+---    key = "user_id",
+---    fields = "user_id, twitter_account",
+---    where = {
+---       public = true
+---    }
+--- })
+--- ```
+---
+--- ```sql
+--- SELECT user_id, twitter_account from "things" where "user_id" in (1, 2, 3, 4) and "public" = TRUE
+--- ```
+---@param primary_keys any[]
+---@param opts? lapis.model.find_all_opts
+---@return lapis.Entity[]
+function Model:find_all(primary_keys, opts) end
+
+--- Counts the number of records in the table that match the clause. The `clause`
+--- argument can either be a string, or a `db.clause` object. If a string is
+--- passed, then it will be automatically prepended with the substring `"WHERE "`,
+--- and will be interpolated with `db.interpolate_query` with the remaining
+--- arguments.
+---
+--- If `clause` is not provided (or is `nil`), then every row in the table will
+--- be counted.
+---
+--- ```lua
+--- local total = Users:count()
+--- local count = Users:count("username like '%' || ? || '%'", "leafo")
+--- ```
+---
+--- ```sql
+--- SELECT COUNT(*) "users"
+--- SELECT COUNT(*) "users" where username like '%' || 'leafo' || '%'
+--- ```
+---@param clause? lapis.db.condition
+---@param ... any
+---@return integer
+function Model:count(clause, ...) end
+
+---@class lapis.model.create_opts
+---@field returning? string|string[] An array table of column names or the string `"*"` to represent all column names. Their values will be return from the insertion query using `RETURNING` clause to initially populate the model object
+
+--- The `create` class method is used to create new rows. It takes a table of
+--- column values to create the row with. It returns an instance of the model.
+--- The create query fetches the values of the primary keys and sets them on the
+--- instance using SQL `RETURNING` clause. This is useful for getting the value
+--- of an auto-incrementing key from the insert statement.
+---
+--- Note: In MySQL the *last insert id* is used to get the id of the row since
+--- the `RETURNING` statement is not available.
+---
+--- ```lua
+--- local user = Users:create({
+---    login = "superuser",
+---    password = "1234"
+--- })
+--- ```
+---
+--- ```sql
+--- INSERT INTO "users" ("password", "login") VALUES ('1234', 'superuser') RETURNING "id"
+--- ```
+---
+--- If any of the column values are `db.raw` then their computed values will
+--- also be fetched using the `RETURN` clause of the `CREATE` statement. The
+--- raw values are replaced by the values returned by the database.
+---
+--- For example, we might create a new row in a table with a `position` column
+--- set to the next highest number:
+---
+--- ```lua
+--- local user = Users:create({
+---    position = db.raw("(select coalesce(max(position) + 1, 0) from users)")
+--- })
+--- ```
+---
+--- ```sql
+--- INSERT INTO "users" (position)
+--- VALUES ((select coalesce(max(position) + 1, 0) from users))
+--- RETURNING "id", "position"
+--- ```
+---
+--- Note: `RETURNING` is not available in MySQL
+---
+--- If your model has any constraints they will be checked before trying to
+--- create a new row. If a constraint fails then `nil` and the error message are
+--- returned from the `create` function.
+---
+--- `create_opts` is an optional table.
+---@param values table<string, any>
+---@param create_opts? lapis.model.create_opts
+---@return lapis.Entity
+function Model:create(values, create_opts) end
+
+--- Returns an array of details about each column the table has. Each item in
+--- the array is a table with the name, `column_name`, and the column type,
+--- `data_type`.
+---
+--- ```lua
+--- local cols = Users:columns()
+--- ```
+---
+--- ```sql
+--- SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'users'
+--- ```
+---
+--- The output might look like this:
+---
+--- ```lua
+--- {
+---    {
+---       data_type = "integer",
+---       column_name = "id"
+---    },
+---    {
+---       data_type = "text",
+---       column_name = "name"
+---    }
+--- }
+--- ```
+---
+--- Note: This example is pulled from PostgreSQL. The format from MySQL and
+--- SQLite will be slightly different
+---@return table
+function Model:columns() end
+
+--- Returns the name of the table backed by the model.
+---
+--- ```lua
+--- Model:extend("users"):table_name() --> "users"
+--- Model:extend("user_posts"):table_name() --> "user_posts"
+--- ```
+---@return string
+function Model:table_name() end
+
+--- Returns the singular name of the table.
+---
+--- ```lua
+--- Model:extend("users"):singular_name() --> "user"
+--- Model:extend("user_posts"):singular_name() --> "user_post"
+--- ```
+---
+--- The singular name is used internally by Lapis when calculating what the name
+--- of the field is when loading rows with `include_in`. It's also used when
+--- determining the foreign key column name with a `has_one` or `has_many`
+--- relation.
+---@return string
+function Model:table_name() end
+
+---@class lapis.Model.include_in_opts
+---@field as? string The name of the field the loaded associated model is stored into
+---@field where? string A table of additional conditionals to limit the query by
+---@field fields? string Raw SQL fragment to control which columns are returned by the query.d `b.escape_identifier` can be used to sanitize column names
+---@field many? boolean set to `true` to fetch many records for each input model instance. The fetched models will be stored as an array on each preloaded object. An empty array is assigned when no rows are found
+---@field value? function a function called for each fetched row where the return value is used in place of the row object when filling `objects
+---@field order? string the order of items when preloading a `many` preload. Taken as a raw SQL clause
+---@field group? string group by clause. Taken as a raw SQL clause
+---@field loaded_results_callback? fun(results: table[]) A callback function to be called with one argument, the resulting array from the query generated by `include_in`. Each row of the result array will have been loaded as the target model, unless loading is disabled with `{ load = false }`. This can be used to add custom preloading logic to the objects found with `include_in`. Note that this will return only the number of results fetched. It's possible for the items in `objects` to point to the same fetched row.
+
+--- Bulk load rows of the model into an array of objects (often the array of
+--- objects is an array of instances of another model). This is used to preload
+--- associations in a single query in order to avoid the [n+1 queries
+--- problem](https://leafo.net/guides/postgresql-preloading.html).
+---
+--- It works by mutating the objects in the array by inserting a new field into
+--- each item where the query returned a result. The name of this new field is
+--- either derived from the model's table name, or manually specified via an
+--- option.
+---
+--- Returns the `objects` array table.
+---
+--- Note: It's possible for `include_in` to assign the same reference to
+--- different items in `objects.` The query will fetch only unique rows that
+--- meet the requirement. As an example, if you are preloading the `author` for
+--- many `posts`, and they all share the same `author_id`, then only one
+--- `author` will be fetched, and the same reference will be assigned to every
+--- `post`.
+---
+--- This is a lower level interface for preloading data on models. In general we
+--- recommend using relations if possible. A relation will internally generate a
+--- call to `include_in` based on how you have configured the relation.
+---
+--- The `key` argument controls the mapping from the fields in each object of
+--- the objects array to the column name used in the query. It can be a string,
+--- an array of strings, or a string*(column)* → string*(field)* table mapping.
+--- When using a string or array of strings then the corresponding associated
+--- key is automatically chosen.
+---
+--- Possible values for `key` argument:
+---
+--- * **String** -- For each object, the value `object[key]` is used to look up
+--- instances of the model by the model's primary key. It's assumed that the
+--- model has a singular primary key; otherwise, an error will occur.
+---   * With `flip` enabled: `key` is used as the foreign key column name, and
+---   `object[opts.local_key or "id"]` is used to retrieve the values.
+--- * **Array of Strings** -- For each object, a composite key is created by
+--- mapping each field of the key array individually via `object[key]` to the
+--- composite primary key of the model.
+--- * **Column Mapping Table** -- This allows for the explicit specification of
+--- the mapping of fields to columns. The *key* of the table is used as the
+--- column name, while the value in the table is used as the field name
+--- referenced from the `objects` argument. If the value is a function, this
+--- function will be called for each object to dynamically calculate the foreign
+--- key value.
+---
+--- In order to demonstrate `include_in` we'll need some models: (The columns are
+--- annotated in a comment above the model).
+---
+--- ```lua
+--- local Model = require("lapis.db.model").Model
+---
+--- -- table with columns: id, name
+--- local Users = Model:extend("users")
+---
+--- -- table with columns: id, user_id, text_content
+--- local Posts = Model:extend("posts")
+--- ```
+---
+--- Given all the posts, we want to find the user for each post. `include_in`
+--- can be called on the model we wish to load, `Users`, with the array of model
+--- instances we want to fill: `posts`. The second argument is the name of the
+--- foreign key on the array of model instances that points to the rows we are
+--- preloading. By default, the value of the foreign key is mapped to the
+--- primary key of the model that is being loaded.
+---
+--- ```lua
+--- local posts = Posts:select() -- this gets all the posts
+--- Users:include_in(posts, "user_id")
+---
+--- print(posts[1].user.name) -- print the fetched data
+--- ```
+---
+--- ```sql
+--- SELECT * from "posts"
+--- SELECT * from "users" where "id" in (1,2,3,4,5,6)
+--- ```
+---
+--- The name of the inserted property is derived from the name of the foreign
+--- key. In this case, `user` was derived from the foreign key `user_id`. If we
+--- want to manually specify the name the `as` option can be used:
+---
+--- ```lua
+--- Users:include_in(posts, "user_id", {
+---    as = "author"
+--- })
+--- ```
+---
+--- Now all the posts will contain a property named `author` with an instance of
+--- the `Users` model.
+---
+--- In this next example a column mapping table is used to explicitly specify
+--- what fields in our object array match to the columns in our query. Here are
+--- the relevant models:
+---
+--- ```lua
+--- local Model = require("lapis.db.model").Model
+---
+--- -- table with columns: id, name
+--- local Users = Model:extend("users")
+---
+--- -- table with columns: user_id, twitter_account, facebook_username
+--- local UserData = Model:extend("user_data")
+--- ```
+---
+--- Now let’s say we have an array of users and we want to fetch the associated
+--- user data.
+---
+--- ```lua
+--- local users = Users:select()
+---
+--- UserData:include_in(users, {
+---   user_id = "id"
+--- })
+---
+--- print(users[1].user_data.twitter_account)
+--- ```
+---
+--- ```sql
+--- SELECT * from "user_data" where "user_id" in (1,2,3,4,5,6)
+--- ```
+---
+--- The second argument of `include_in`, called `key`, is a table with the value
+--- `{"user_id" = "id"}`. This instructs `include_in` to take all the values
+--- stored in the `id` field from the users array to use as values to look up
+--- rows in `user_data` table by the `user_id` column.
+---
+--- The field name that is used to store each result in the users array is
+--- derived from the name of the included table. In this case, `UserData` →
+--- `user_data`. This can be overridden by using the `as` option.
+---
+--- Note: The table name is converted to English singular form. Since user_data
+--- is both singular and plural, it's used as is.
+---
+--- One last common scenario is preloading a one-to-many relationship. You can
+--- use the `many` option to instruct `include_in` to collect all associated
+--- results for each input object into an array. (The derived field name will be
+--- plural)
+---
+--- For example, we might load all the posts for each user:
+---
+--- ```sql
+--- local users = Users:select()
+---
+--- Posts:include_in(users, {
+---    user_id = "id"
+--- }, {
+---    many = true
+--- })
+--- ```
+---
+--- ```sql
+--- SELECT * from "posts" where "user_id" in (1,2,3,4,5,6)
+--- ```
+---
+--- Each `users` object will now have a `posts` field that is an array
+--- containing all the associated posts that were found. (Note that `posts` is a
+--- plural derived field name when `many` is true.)
+---@param objects table[]
+---@param key string | string[] | table<string, string>
+---@param opts? lapis.Model.include_in_opts
+function Model:include_in(objects, key, opts) end
+
+---@class lapis.model.paginator_opts
+---@field per_page? integer The number of items fetched per page
+---@field prepare_results? fun(entities: lapis.Entity[]): lapis.Entity[] A function that is passed the results of any fetched page to prepare the objects before being returned from methods like `get_page`, `get_all`, and `each_item`. It should return the results after they have been prepared or updated. This is useful for preloading related data automatically when fetching results to avoid the n+1 queries problem
+
+--- Similar to `select` but returns a `Paginator`.
+---@param query string|lapis.db.encodable
+---@param ... any|lapis.model.paginator_opts
+---@return lapis.Paginator
+function Model:paginated(query, ...) end
+
+--- This method is used to look up the model for a relation by the name
+--- specified in the relation. By default the following function is provided:
+---
+--- ```lua
+--- local get_relation_model
+--- get_relation_model = function(self, name)
+---    return require("models")[name]
+--- end
+--- ```
+---
+--- If your model has relations that are pulled from other sources than the
+--- `models` module, then you can overwrite this method to handle loading the
+--- models for those relations.
+---@param name string
+---@return lapis.Model
+function Model:get_relation_model(name) end
+
+---@class lapis.model.relation
+---@field [1] string
+---@field belongs_to? string
+---@field has_many? string
+---@field has_one? string
+---@field key? string The foreign key to search on. Either a string for singular foreign key, an array table to specify composite foreign keys, or a key-value table to specify cross-table column mapping.
+---@field where? table<string, any> Set additional constraints on the things returned, as a table
+---@field order? string A SQL fragment as a string used to specify a default `order by` clause when the relation is fetched
+---@field as? string Override the name included in the generated methods, and the cached object
+
+---@class lapis.model.extend_opts
+---@field constraints? table<string, fun(self: lapis.Model, value: any, name: string, object: table<string, any>): any>
+---@field primary_key? string|string[]
+---@field timestamp? boolean
+---@field relations? lapis.model.relation[]
+---@field url_params? fun(entity: lapis.Entity, req: lapis.Request, ...: any): any
+
+--- Creates a new subclass of the `Model` base class. The `fields` argument is a
+--- table of properties that will be copied into the instance metatable of the
+--- newly created class.
+---
+--- The fields named "primary_key", "timestamp", "constraints", "relations" will
+--- be copied into the model class object instead of the instance. Relations
+--- must be set in `fields` in order for the auto-generated methods to be
+--- created.
+---
+--- This method returns the newly created class object, followed by the instance
+--- metatable.
+---
+--- The instance metatable can be used as an alternative syntax to add new
+--- methods to model instances.
+---@param table_name string
+---@param opts? lapis.model.extend_opts
+---@return self
+---@return lapis.Entity
+function Model:extend(table_name, opts) end
+
+model.Model = Model
+
+---@class lapis.Entity
+---@field [string] any
+local Entity = {}
+
+---@class lapis.Entity.update_opts
+---@field timestamp? boolean The `updated_at` field will be updated to the current time if the model has timestamps enabled. Note that if the update itself contains `updated_at` then that will take precedence over the auto-update.
+---@field returning? string Manually specify a list of columns to be returned from the query when issuing the update. These values will be assigned to the model instance object if the query completes successfully. Note that any updated fields that use `db.raw` will automatically use `returning` and it is not necessary to manually specify. A special value of `"*"` can be provided to cause every field to be returned with the update.
+---@field where? table<string, any> A table of additional conditions to add to the `WHERE` clause of the updated query. This can be used to have an atomic conditional update. The return value should be checked to see if the update succeeded or not.
+
+--- Issue a query to update the row backed by the instance of the model. The
+--- values of the primary keys, as specified by the model's class, are used to
+--- uniquely identify the row for updating. The `updated_at` timestamp field
+--- will also be set if the model has timestamps enabled.
+---
+--- This method returns two values:
+---
+--- 1. `true` or `false` if the query was able to update a row successfully
+--- (Generally this will always return `true` unless the row has been deleted
+--- from the database before the update was issued, or a conditional update is
+--- being used)
+--- 2. The result object from the `db.update` function that is called internally
+---
+--- Note: The second return value is always a table with the result object, which
+--- is incompatible with `assert` when trying to throw an error if the update
+--- didn't take place
+---
+--- The arguments to this method come in two forms:
+---
+--- 1. Update table
+--- 2. Field name list
+---
+--- In the first form we simply pass a table mapping column names to the updated
+--- values. The values in the table will be merged into the instance of the
+--- model to reflect the update if the update is able to complete successfully.
+---
+--- ```lua
+--- local user = Users:find(1)
+---
+--- user:update({
+---    login = "uberuser",
+---    email = "admin@example.com"
+--- })
+---
+--- assert(user.login == "uberuser")
+--- ```
+---
+--- ```sql
+--- UPDATE "users" SET "login" = 'uberuser', "email" = 'admin@example.com' WHERE "id" = 1
+--- ```
+---
+--- The second form takes a list of field or column names to synchronize from
+--- the model instance to the database. With this approach first edit the model
+--- instance with updated values, then issue the `update` call to save the
+--- changes:
+---
+--- ```lua
+--- local user = Users:find(1)
+--- user.login = "uberuser"
+--- user.email = "admin@example.com"
+--- user:update("login", "email")
+--- ```
+---
+--- ```sql
+--- UPDATE "users" SET "login" = 'uberuser', "email" = 'admin@example.com' WHERE "id" = 1
+--- ```
+---
+--- Note: You can also pass in an array of field names via a table as the first
+--- argument to the update method. The two forms can be used together with a
+--- table as the first argument.
+---
+--- If any of values used for the update are SQL fragments generated by
+--- something like `db.raw`, then a `RETURNING` clause will be used to determine
+--- the final value from the database to store on the model instance, similar to
+--- the `create` class method.
+---
+--- ```lua
+--- local user = Users:crate({
+---    id = 10,
+---    views = 1
+--- })
+---
+--- user:update({
+---    views = db.raw("views + 12")
+--- })
+---
+--- assert(count == 13)
+--- ```
+---@param ... table | string[] | lapis.Entity.update_opts
+---@return boolean, table
+function Entity:update(...) end
+
+--- Attempts to delete the row backed by the model instance based on the primary
+--- key.
+---
+--- ```lua
+--- local user = Users:find(1)
+--- user:delete()
+--- ```
+---
+--- ```sql
+--- DELETE FROM "users" WHERE "id" = 1
+--- ```
+---
+--- The first argument can be a `db.clause` object to cause the deletion be
+--- contingent on another set of conditions:
+---
+--- ```lua
+--- local user = Users:find(1)
+--- user:delete(db.clause({
+---    active = false
+--- }))
+--- ```
+---
+--- ```sql
+--- DELETE FROM "users" WHERE "id" = 1 and not "active"
+--- ```
+---
+--- Any remaining arguments will be append as `RETURNING` columns for the result
+--- object in the second return value. This can be used to atomically know what
+--- the row contained at the time of deletion, as the model instance that delete
+--- was called on may be out of date if two requests are processing the same
+--- request at the same time.
+---
+--- ```lua
+--- local user = Users:find(1)
+--- local success, res = user:delete("status")
+--- print(res.affected_rows)
+--- print(res[1].status)
+--- ```
+---
+--- ```sql
+--- DELETE FROM "users" WHERE "id" = 1 RETURNING "status"
+--- ```
+---
+--- `delete` will return `true` as the first return value if the row was
+--- actually deleted. It's important to check this value to avoid any race
+--- conditions when running code in response to a delete.
+---
+--- The following is an example of an incorrect way to delete a row with side
+--- effects. It's possible that the delete did not if another thread processed
+--- the request first.
+---
+--- ```lua
+--- local user = assert(Users:find(1))
+--- user:delete()
+--- decrement_total_user_count()
+--- ```
+---
+--- This is the correct way to write a deletion side effect:
+---
+--- ```lua
+--- local user = assert(Users:find(1))
+--- if user:delete() then
+---    decrement_total_user_count()
+--- end
+--- ```
+---
+--- Because multiple request can be processed at the same time, it's possible
+--- that if two requests are able to load the model instance at the same time,
+--- and `delete` may end up getting called twice. This isn't a problem by itself,
+--- but the `decrement_total_user_count` function would get called twice and may
+--- invalidate whatever data it has.
+---@param ... lapis.db.condition|string
+---@return lapis.db.query_result
+function Entity:delete(...) end
+
+--- Updates the values of the fields on the instance from the database.
+---
+--- If your model instance becomes out of date from an external change, use the
+--- `refresh` method to re-fetch and re-populate its data.
+---
+--- If the row now longer exists in the database, then `refresh` will throw an
+--- error.
+---
+--- ```lua
+--- local Posts = Model:extend("posts")
+--- local post = Posts:find(1)
+--- post:refresh()
+--- ```
+---
+--- ```sql
+--- SELECT * from "posts" where id = 1
+--- ```
+---
+--- By default all fields are refreshed. If you only want to refresh specific
+--- fields then pass them in as arguments:
+---
+--- ```lua
+--- local Posts = Model:extend("posts")
+--- local post = Posts:find(1)
+--- post:refresh("color", "height")
+--- ```
+---
+--- ```sql
+--- SELECT "color", "height" from "posts" where id = 1
+--- ```
+---@param ... string
+function Entity:refresh(...) end
+
+--- This method implements the interface for `url_for` that allows the model
+--- instance to be used as a value for a URL parameter. The default
+--- implementation will concatenate all of the primary keys by the `-` character.
+--- If there is only one primary key, then the `url_key` will be just that value
+--- converted to a string.
+---
+--- Generally, you should implement `url_params` method on your model if you
+--- would like to have the model have a fully declared URL within your app.
+---@param req lapis.Request
+---@param ... any
+---@return any
+function Entity:url_key(req, ...) end
+
+--- ```lua
+--- local preload = require("lapis.db.model").preload
+--- ```
+---
+--- The `preload` function is a general purpose preloading for loading relations
+--- on model instances. The first argument is an array of instances, and all
+--- other arguments are the names of the relations to load.
+---
+--- You can also preload nested relations by using the hash table syntax:
+---
+--- ```lua
+--- preload(posts, {user = "twitter_account"})
+--- ```
+---
+--- The hash table syntax can be combined with regular relation names as strings,
+--- letting you preload complex sets of data in a single line. In the examples
+--- above, the `user` relation is loaded on the posts, then every user has the
+--- `twitter_account` relation loaded.
+---@param entities lapis.Entity[]
+---@param ... table<string, string>|string
+function model.preload(entities, ...) end
+
+--- Note: This function should be avoided in favor of the `preload` function
+--- when possible. If you need to pass parameters to a preload call then you
+--- need to use `preload_relation`
+---
+--- The class method `preload_relation` takes an array table of instances of the
+--- model, and the name of a relation. It fills all the instances with the
+--- associated models with a single query.
+---
+--- Internally this method called the `include_in` method. Any additional
+--- arguments passed to `preload_relation` are merged in the options to the call
+--- to `include_in`.
+---
+--- ```lua
+--- local Model = require("lapis.db.model").Model
+---
+--- local Posts = Model:extend("posts", {
+---    relations = {
+---       {"user", belongs_to = "Users"}
+---    }
+--- })
+--- ```
+---
+--- A `get_` method is added to the model to fetch the associated row:
+---
+--- ```lua
+--- local posts = Posts:select() -- select all the posts
+--- -- load the user on all the posts
+--- Posts:preload_relation(posts, "user")
+--- ```
+---
+--- ```sql
+--- SELECT * from "users" where "id" in (3,4,5,6,7);
+--- ```
+---@param entities lapis.Entity[]
+---@param ... string
+---@deprecated
+function Model:preload_relation(entities, name, ...) end
+
+--- Note: This call is deprecated, use the `preload` function to preload many
+--- relations in a single call
+---
+--- `preload_relations` is a helper method for calling `preload_relation` many
+--- times with different relations. This form does not support passing any options
+--- to the preloaders. You should replace `Model` with the model that contains the
+--- relation definition.
+---
+--- ```lua
+--- -- load three separate relations
+--- Posts:preload_relations(posts, "user", "tags", "category")
+--- ```
+---@param entities lapis.Entity[]
+---@param ... string
+---@deprecated
+function Model:preload_relations(entities, ...) end
+
+---@class lapis.EnumItem
+local EnumItem = {}
+
+---@param item string|integer
+---@return integer
+function EnumItem:for_db(item) end
+
+---@param item string|integer
+---@return string
+function EnumItem:to_name(item) end
+
+--- The `enum` function lets you create a special table that lets you convert
+--- between integer constants and names. This is useful for creating
+--- enumerations in your database rows by using integers to represent a state.
+---
+--- ```lua
+--- local model = require("lapis.db.model")
+--- local Model, enum = model.Model, model.enum
+---
+--- local Posts = Model:extend("posts")
+--- Posts.statuses = enum {
+---    pending = 1,
+---    public = 2,
+---    private = 3,
+---    deleted = 4
+--- }
+--- ```
+---
+--- ```lua
+--- assert(Posts.statuses[1] == "pending")
+--- assert(Posts.statuses[3] == "private")
+---
+--- assert(Posts.statuses.public == 2)
+--- assert(Posts.statuses.deleted == 4)
+---
+--- assert(Posts.statuses:for_db("private") == 3)
+--- assert(Posts.statuses:for_db(3) == 3)
+---
+--- assert(Posts.statuses:to_name(1) == "pending")
+--- assert(Posts.statuses:to_name("pending") == "pending")
+---
+--- -- using to_name or for_db with undefined enum value throws error
+---
+--- Posts.statuses:to_name(232) -- error
+--- Posts.statuses:for_db("hello") -- error
+--- ```
+---@param enum table<string, integer>
+---@return {[string]: integer|lapis.EnumItem, [integer]: string|lapis.EnumItem}
+function model.enum(enum) end
+
+-- not having generics means a lot of extending and overloading
+
+return model
