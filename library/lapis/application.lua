@@ -25,7 +25,7 @@ local Application = {}
 --- `{views_prefix}.{layout_name}`.
 ---
 --- Default `require('lapis.views.layout')`
-Application.layout = require('lapis.views.layout')
+Application.layout = require("lapis.views.layout")
 
 --- View used to render an unrecoverable error in the default `handle_error`
 --- callback. The value of this field is passed directly to Render Option
@@ -33,25 +33,25 @@ Application.layout = require('lapis.views.layout')
 --- by a widget or template.
 ---
 --- Default `require('lapis.views.error')`
-Application.error_page = require('lapis.views.error')
+Application.error_page = require("lapis.views.error")
 
 --- A prefix appended to the view name (joined by .) whenever a view is
 --- specified by string to determine the full module name to require.
 ---
 --- Default `'views'`
-Application.views_prefix = 'views'
+Application.views_prefix = "views"
 
 --- A prefix appended to the action name (joined by .) whenever an action is
 --- specified by string to determine the full module name to require.
 ---
 --- Default `'actions'`
-Application.actions_prefix = 'actions'
+Application.actions_prefix = "actions"
 
 --- A prefix appended to the flow name (joined by .) whenever a flow is
 --- specified by string to determine the full module name to require.
 ---
 --- Default `'flows'`
-Application.flows_prefix = 'flows'
+Application.flows_prefix = "flows"
 
 --- The class that will be used to instantiate new request objects when
 --- dispatching a request.
@@ -59,7 +59,7 @@ Application.flows_prefix = 'flows'
 --- Default `require('lapis.request')`
 ---
 ---@see lapis.Request
-Application.Request = require('lapis.request')
+Application.Request = require("lapis.request")
 
 --- When a request does not match any of the routes you've defined, the
 --- `default_route` method will be called to create a response.
@@ -243,7 +243,6 @@ function Application:enable(feature) end
 ---@param fn lapis.application.ActionFn
 function Application:before_filter(fn) end
 
-
 ---@class lapis.Application.include_opts
 ---@field path? string If provided, every path copied over will be prefixed with the value of this option. It should start with a `/` and a trailing slash should be included if desired.
 ---@field name? string If provided, every route name will be prefixed with the value of the this option. Provide a trailing `.` if desired.
@@ -380,7 +379,7 @@ function application.yield_error(error_message) end
 ---@return any ...
 function application.assert_error(v, message, ...) end
 
---- Return a new function that will parse the body of the request as JSON and 
+--- Return a new function that will parse the body of the request as JSON and
 --- inject it into `self.params` if the `Content-Type` is set to
 --- `application/json`. Suitable for wrapping an action handler to make it aware
 --- of JSON encoded requests.

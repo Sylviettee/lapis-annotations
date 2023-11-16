@@ -491,7 +491,7 @@ function db.is_array(obj) end
 --- ```sql
 --- UPDATE "the_table" SET name = NULL
 --- ```
-db.NULL = ''
+db.NULL = ""
 
 ---@type lapis.db.encodable
 --- Represents `TRUE` in SQL syntax. In most cases, it is not necessary to use

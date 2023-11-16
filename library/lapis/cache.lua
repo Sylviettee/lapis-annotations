@@ -58,7 +58,7 @@ local cache = {}
 --- `x-memory-cache-hit`. This is useful for debugging your application to make
 --- sure the cache is working.
 ---
---- Instead of passing a function as the action of the cache you can also pass 
+--- Instead of passing a function as the action of the cache you can also pass
 --- in a table. When passing in a table the function must be the first
 --- numerically indexed item in the table.
 ---

@@ -5,7 +5,7 @@
 --- Re-exports Application from `lapis.application`.
 local lapis = {}
 
-lapis.Application = require('lapis.application').Application
+lapis.Application = require("lapis.application").Application
 
 ---@private
 ---@type table

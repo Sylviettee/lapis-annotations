@@ -34,7 +34,7 @@ local Widget = {}
 --- a table of properties that will be copied into the instance metatable of the
 --- newly created class, or it can be a function and it will be set as the
 --- content field.
---- 
+---
 --- `name` is not directly used by Lapis but it can be helpful to provide it for
 --- debugging and for implementing systems that derive details about the
 --- rendered output based on the name of the widget (eg. automatically generated

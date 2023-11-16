@@ -243,43 +243,43 @@ local types = {}
 ---@alias lapis.schema.type string | fun(opts?: lapis.schema.type_opts): string
 
 ---@type lapis.schema.type
-types.id = ''
+types.id = ""
 
 ---@type lapis.schema.type
-types.boolean = ''
+types.boolean = ""
 
 ---@type lapis.schema.type
-types.date = ''
+types.date = ""
 
 ---@type lapis.schema.type
-types.double = ''
+types.double = ""
 
 ---@type lapis.schema.type
-types.foreign_key = ''
+types.foreign_key = ""
 
 ---@type lapis.schema.type
-types.integer = ''
+types.integer = ""
 
 ---@type lapis.schema.type
-types.numeric = ''
+types.numeric = ""
 
 ---@type lapis.schema.type
-types.real = ''
+types.real = ""
 
 ---@type lapis.schema.type
-types.serial = ''
+types.serial = ""
 
 ---@type lapis.schema.type
-types.text = ''
+types.text = ""
 
 ---@type lapis.schema.type
-types.varchar = ''
+types.varchar = ""
 
 ---@type lapis.schema.type
-types.enum = ''
+types.enum = ""
 
 ---@type string | fun(opts?: lapis.schema.time_opts): string
-types.time = ''
+types.time = ""
 
 schema.types = types
 
